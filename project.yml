@@ -1,0 +1,27 @@
+name: ClaudeUsageMonitor
+options:
+  bundleIdPrefix: com.local
+  deploymentTarget:
+    macOS: "13.0"
+  xcodeVersion: "15"
+
+settings:
+  base:
+    PRODUCT_BUNDLE_IDENTIFIER: com.local.ClaudeUsageMonitor
+    SWIFT_VERSION: 5.9
+    MACOSX_DEPLOYMENT_TARGET: 13.0
+    CODE_SIGN_IDENTITY: "-"
+    CODE_SIGN_STYLE: Manual
+    DEVELOPMENT_TEAM: ""
+
+targets:
+  ClaudeUsageMonitor:
+    type: application
+    platform: macOS
+    sources:
+      - ClaudeUsageMonitor
+    settings:
+      base:
+        INFOPLIST_FILE: ClaudeUsageMonitor/Info.plist
+        CODE_SIGN_ENTITLEMENTS: ClaudeUsageMonitor/ClaudeUsageMonitor.entitlements
+        PRODUCT_BUNDLE_IDENTIFIER: com.local.ClaudeUsageMonitor
