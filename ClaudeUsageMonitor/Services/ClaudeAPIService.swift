@@ -64,6 +64,11 @@ class ClaudeAPIService: NSObject {
             defer: false
         )
         window.isReleasedWhenClosed = false
+        // 完全に不可視にする（Xcode等起動時に画面中央に出てしまうのを防ぐ）
+        window.alphaValue = 0
+        window.ignoresMouseEvents = true
+        // Mission Control・Exposé・ウィンドウサイクルから除外
+        window.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenNone]
 
         webView = WKWebView(frame: window.contentView!.bounds, configuration: config)
         webView.autoresizingMask = [.width, .height]
@@ -160,11 +165,17 @@ class ClaudeAPIService: NSObject {
         }
 
         // 週間: seven_day キー
+        // five_hour と同じスケールを使う（five_hour が 0〜100 なら seven_day も同様）
         if let wk = usage["seven_day"] as? [String: Any] {
             let raw = wk["utilization"] as? Double ?? 0
-            NSLog("[ClaudeMonitor] seven_day utilization=%.4f", raw)
-            // five_hour は 0〜100、seven_day は 0〜1 の可能性があるため正規化
-            weeklyPct = raw > 1.0 ? Int(raw.rounded()) : Int((raw * 100).rounded())
+            let fiveHourRaw = (usage["five_hour"] as? [String: Any])?["utilization"] as? Double ?? 0
+            NSLog("[ClaudeMonitor] seven_day raw=%.4f five_hour raw=%.4f", raw, fiveHourRaw)
+            // five_hour が 0〜100 スケール（>1.0）なら seven_day も同スケール、そうでなければ 0〜1 スケール
+            if fiveHourRaw > 1.0 || raw > 1.0 {
+                weeklyPct = Int(raw.rounded())
+            } else {
+                weeklyPct = Int((raw * 100).rounded())
+            }
             if let resetStr = wk["resets_at"] as? String {
                 weeklyResetAt = formatter.date(from: resetStr)
             }
