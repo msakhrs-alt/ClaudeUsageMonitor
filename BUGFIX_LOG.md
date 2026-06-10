@@ -77,7 +77,7 @@ nonisolated func userContentController(..., didReceive message: WKScriptMessage)
 **ファイル:** `ClaudeAPIService.swift`
 
 **症状:**
-`WKWebView(frame: .zero)` を どのウィンドウにも追加せず使っていた。
+`WKWebView(frame: .zero)` をどのウィンドウにも追加せず使っていた。
 ページロードは試みるが JSインターセプターが発火しない、または
 不安定なタイミングで実行されていた。
 
@@ -263,7 +263,6 @@ stale になるのはその後 10 分経過してからなので、タイミン�
 
 **修正:**
 カウントダウンタイマー（1秒ごと）内でも `updateStatusBar` を呼ぶよう変更。
-これにより stale になった瞬間にメニューバーの色とアイコンが自動更新される。
 
 ```swift
 countdownTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
@@ -275,6 +274,106 @@ countdownTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
         }
     }
 }
+```
+
+---
+
+## BUG-11｜週間使用量が100%と誤表示（実際は1%）
+
+**ファイル:** `ClaudeAPIService.swift`
+
+**症状:**
+週間使用量が実際には1%程度なのに、100%と表示される。
+
+**原因:**
+`seven_day.utilization = 1.0` のとき、スケール自動判定の条件 `raw > 1.0` が
+false になるため `1.0 × 100 = 100%` と計算されていた。
+BUG-09 の修正で導入したスケール判定ロジックの閾値が不適切だった。
+
+**修正:**
+`seven_day` のスケール判定に `five_hour.utilization` の値を参照する方式に変更。
+`five_hour > 1.0` なら両フィールドとも 0〜100 スケールとしてそのまま使用。
+
+```swift
+let fiveHourRaw = fh["utilization"] as? Double ?? 0
+let sevenDayRaw = wk["utilization"] as? Double ?? 0
+let isLargeScale = fiveHourRaw > 1.0
+sessionPct = isLargeScale ? Int(fiveHourRaw.rounded()) : Int((fiveHourRaw * 100).rounded())
+weeklyPct  = isLargeScale ? Int(sevenDayRaw.rounded()) : Int((sevenDayRaw * 100).rounded())
+```
+
+---
+
+## BUG-12｜Xcode等起動時に claude.ai の画面が画面中央に表示される
+
+**ファイル:** `ClaudeAPIService.swift`
+
+**症状:**
+Xcode や他のアプリを起動するたびに、オフスクリーンに置いていたはずの
+WKWebView ウィンドウが画面中央に飛び出してくる。
+
+**原因:**
+`orderBack(nil)` したオフスクリーンウィンドウ（x: -4000）を、macOS の
+ウィンドウマネージャーが新しいアプリ起動時に可視領域へ自動移動させていた。
+
+**修正:**
+ウィンドウを完全に不可視・非インタラクティブに設定し、Mission Control 等からも除外。
+
+```swift
+window.alphaValue = 0
+window.ignoresMouseEvents = true
+window.collectionBehavior = [
+    .canJoinAllSpaces,
+    .stationary,
+    .ignoresCycle,
+    .fullScreenNone
+]
+```
+
+---
+
+## BUG-13｜Finder でアプリアイコンが表示されない
+
+**ファイル:** `Assets.xcassets/AppIcon.appiconset/Contents.json`, `Info.plist`
+
+**症状:**
+ビルド・インストール後も Finder およびLaunchpad でアプリアイコンが
+デフォルトのグリッドアイコンのまま表示される。
+
+**原因:**
+1. `Contents.json` が `AppIcon.icns` を全サイズスロットに割り当てる誤った形式だった。
+   Xcode のアセットカタログは各サイズごとに個別の PNG を要求するため、
+   `.icns` をそのまま各スロットに指定してもビルド成果物の `Resources/` に
+   `AppIcon.icns` がコピーされない。
+2. `Info.plist` に `CFBundleIconName` の記述がなく、OS がアイコンを参照できなかった。
+
+**修正:**
+`AppIcon.icns`（1024×1024）から `sips` で各サイズ PNG を生成し、
+`Contents.json` を正しい形式に書き直した。
+
+```bash
+ICONSET=~/Developer/ClaudeUsageMonitor/ClaudeUsageMonitor/Assets.xcassets/AppIcon.appiconset
+sips -s format png "$ICONSET/AppIcon.icns" --out /tmp/icon_1024.png
+sips -z 16 16     /tmp/icon_1024.png --out "$ICONSET/icon_16x16.png"
+sips -z 32 32     /tmp/icon_1024.png --out "$ICONSET/icon_16x16@2x.png"
+sips -z 32 32     /tmp/icon_1024.png --out "$ICONSET/icon_32x32.png"
+sips -z 64 64     /tmp/icon_1024.png --out "$ICONSET/icon_32x32@2x.png"
+sips -z 128 128   /tmp/icon_1024.png --out "$ICONSET/icon_128x128.png"
+sips -z 256 256   /tmp/icon_1024.png --out "$ICONSET/icon_128x128@2x.png"
+sips -z 256 256   /tmp/icon_1024.png --out "$ICONSET/icon_256x256.png"
+sips -z 512 512   /tmp/icon_1024.png --out "$ICONSET/icon_256x256@2x.png"
+sips -z 512 512   /tmp/icon_1024.png --out "$ICONSET/icon_512x512.png"
+sips -z 1024 1024 /tmp/icon_1024.png --out "$ICONSET/icon_512x512@2x.png"
+```
+
+`Info.plist` に `CFBundleIconName = AppIcon` を追加後リビルド。
+`/Applications/` の古いバイナリを削除・再コピーし、Finder キャッシュをリセット。
+
+```bash
+rm -rf /Applications/ClaudeUsageMonitor.app
+cp -R ~/Library/Developer/Xcode/DerivedData/ClaudeUsageMonitor-*/Build/Products/Debug/ClaudeUsageMonitor.app /Applications/
+sudo find /private/var/folders -name "com.apple.iconservices" -exec rm -rf {} + 2>/dev/null
+killall Finder
 ```
 
 ---
@@ -293,3 +392,6 @@ countdownTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
 | 08 | API仕様 | ClaudeAPIService | データ取得不可（根本原因） |
 | 09 | API仕様 | ClaudeAPIService | 週間使用量が常に0% |
 | 10 | UI更新 | AppDelegate | stale表示が機能しない |
+| 11 | API仕様 | ClaudeAPIService | 週間使用量が100%と誤表示 |
+| 12 | WebKit | ClaudeAPIService | オフスクリーンウィンドウが前面に出る |
+| 13 | アセット設定 | Assets.xcassets / Info.plist | Finderでアイコンが表示されない |
