@@ -97,6 +97,11 @@ ClaudeUsageMonitor/
 
 ## 更新履歴
 
+###v1.2.0 (2026-06-10)
+
+- **fix:** 週間使用量が100%と誤表示される問題を修正（seven_day.utilization のスケール判定を five_hour の値を基準に動的判定する方式に変更）
+- **fix:** Xcode起動時にclaude.aiの画面がモニター中央に表示される問題を修正（alphaValue=0 + collectionBehavior で完全不可視化）
+
 ### v1.1.0 (2026-06-08)
 
 - **fix:** `/api/bootstrap` 廃止 → `GET /api/organizations` 直接呼び出しに変更（Loading...問題を修正）
