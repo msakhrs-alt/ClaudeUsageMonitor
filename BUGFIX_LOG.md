@@ -378,6 +378,47 @@ killall Finder
 
 ---
 
+## BUG-14｜スリープ復帰時に WebContent プロセスが ~2.4GB に膨張（再発）
+
+**ファイル:** `ClaudeAPIService.swift`, `AppDelegate.swift`
+
+**症状:**
+スリープからの復帰時、高確率でメモリ使用量が 2.4GB 付近に張り付く。
+BUG-04 で一度対処したはずだが再発していた。
+
+**原因（BUG-04 の対処が不十分だった理由）:**
+使用量取得のたびに、常駐オフスクリーン WKWebView へ
+`https://claude.ai/settings/usage` の React SPA を**まるごとロード**していた。
+実際に使うのは `callAsyncJavaScript` 内の `fetch('/api/...')` だけで SPA 本体は不要。
+
+- BUG-04 のウィンドウ縮小・取得後の空HTMLロードは backing store のサイズを
+  縮めただけで、**SPA の JS ヒープがロードされること自体**は防げていなかった。
+- スリープ/復帰のハンドリングが無く（`NSWorkspace` 監視なし）、スリープ中は
+  繰り返し `Timer` も WebKit のメモリプレッシャー回収も停止する。
+- 復帰時、スリープ突入時に進行中だったロードは完了せず空HTMLクリーンアップが
+  走らないまま SPA が居座り、その上に refresh タイマーが新しい SPA ロードを重ねる。
+  claude.ai の service worker / 再接続する websocket も一斉に立ち上がり、
+  `WebContent` プロセスが ~2.4GB に膨張していた。
+
+**修正:**
+1. **SPA をロードしない。** `loadSimulatedRequest` で claude.ai オリジン上に
+   空の最小 HTML を置く。ドキュメントのオリジンが claude.ai なので保存済み
+   Cookie を使った same-origin の `fetch` はそのまま動くが、重い React バンドルは
+   一切実行されない（メモリ膨張の根治）。
+   ```swift
+   let response = HTTPURLResponse(url: usageURL, statusCode: 200,
+       httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "text/html; charset=utf-8"])!
+   webView.loadSimulatedRequest(URLRequest(url: usageURL),
+       response: response, responseData: Data("<!DOCTYPE html>...".utf8))
+   ```
+2. **ログイン判定を HTTP ステータスベースに。** 簡易ドキュメントでは login へ
+   自動リダイレクトされないため、`fetch` の 401/403 で `needsLogin()` を呼ぶ。
+3. **sleep/wake ハンドリング追加。** `NSWorkspace.willSleepNotification` で
+   タイマー停止＋ページ解放（`prepareForSleep()`）、`didWakeNotification` で
+   タイマー再開＋再取得。進行中ロードの取り残しを防ぐ。
+
+---
+
 ## 修正サマリー
 
 | # | 種別 | ファイル | 影響 |
@@ -395,3 +436,4 @@ killall Finder
 | 11 | API仕様 | ClaudeAPIService | 週間使用量が100%と誤表示 |
 | 12 | WebKit | ClaudeAPIService | オフスクリーンウィンドウが前面に出る |
 | 13 | アセット設定 | Assets.xcassets / Info.plist | Finderでアイコンが表示されない |
+| 14 | メモリ | ClaudeAPIService / AppDelegate | スリープ復帰時に~2.4GBへ膨張（BUG-04再発） |

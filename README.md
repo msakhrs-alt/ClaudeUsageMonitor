@@ -10,13 +10,13 @@ macOSメニューバーでClaude.aiの使用量をリアルタイム表示する
 
 Claude.aiの使用量（セッション・週間）をmacOSメニューバーにリアルタイム表示するアプリ。
 
-| 項目 | 内容 |
-|------|------|
-| 開発日 | 2026-06-08 |
-| 言語 | Swift / SwiftUI |
-| 最低macOS | macOS 13 Ventura |
-| ライセンス | MIT |
-| 参照OSS | [theDanButuc/Claude-Usage-Monitor](https://github.com/theDanButuc/Claude-Usage-Monitor) (MIT) |
+| 項目       | 内容                                                                                          |
+| ---------- | --------------------------------------------------------------------------------------------- |
+| 開発日     | 2026-06-08                                                                                    |
+| 言語       | Swift / SwiftUI                                                                               |
+| 最低macOS  | macOS 13 Ventura                                                                              |
+| ライセンス | MIT                                                                                           |
+| 参照OSS    | [theDanButuc/Claude-Usage-Monitor](https://github.com/theDanButuc/Claude-Usage-Monitor) (MIT) |
 
 ## 機能
 
@@ -49,9 +49,11 @@ open /Applications/ClaudeUsageMonitor.app
 
 ### データ取得方式
 
-- `WKWebView` で `claude.ai/settings/usage` を非表示ロード
-- JavaScriptで `GET /api/organizations` → org UUID取得 → `/api/organizations/{uuid}/usage` の2段階フェッチ
+- `WKWebView` の `loadSimulatedRequest` で **claude.ai オリジン上に空の最小HTML**を配置（重いReact SPAはロードしない＝メモリ膨張を防止）
+- JavaScriptで `GET /api/organizations` → org UUID取得 → `/api/organizations/{uuid}/usage` の2段階フェッチ（保存済みCookieによるsame-originフェッチ）
+- 未ログイン判定は `fetch` の HTTP 401/403 ステータスで実施
 - セッションCookieは `WKWebsiteDataStore.default()` で永続化
+- スリープ復帰時は `NSWorkspace` の sleep/wake 通知でタイマー停止・ページ解放／復帰後に再開・再取得
 - APIキー不要
 
 ### APIレスポンス構造
@@ -97,6 +99,12 @@ ClaudeUsageMonitor/
 
 ## 更新履歴
 
+### v1.3.0 (2026-06-11)
+
+- **fix:** スリープ復帰時にメモリ使用量が~2.4GBに膨張する問題を修正（BUG-04/12の再発）。取得のたびに claude.ai の React SPA を丸ごとロードしていたのが根本原因。`loadSimulatedRequest` で claude.ai オリジン上に空の最小HTMLを置き、SPA本体をロードせずに same-origin フェッチする方式へ変更
+- **fix:** sleep/wake ハンドリングを追加（`NSWorkspace` 通知）。スリープ前にタイマー停止＋ページ解放、復帰時に再開＋再取得し、進行中ロードの取り残しを防止
+- **change:** 簡易ドキュメント化に伴い、未ログイン判定を URL リダイレクトから `fetch` の 401/403 ステータス判定へ変更
+
 ### v1.2.0 (2026-06-10)
 
 - **fix:** 週間使用量が100%と誤表示される問題を修正（seven_day.utilization のスケール判定を five_hour の値を基準に動的判定する方式に変更）
@@ -115,15 +123,16 @@ ClaudeUsageMonitor/
 
 ## 主なバグと解決
 
-| # | 症状 | 原因 | 解決 |
-|---|------|------|------|
-| BUG-03 | JSが発火しない | WebViewがビュー階層に未所属 | 画面外ウィンドウ（x:-2048）に載せる |
-| BUG-05 | async JSの戻り値が取れない | evaluateJavaScriptはPromise非対応 | callAsyncJavaScriptに変更 |
-| BUG-08 | データが全く取れない | APIエンドポイントの特定ができていなかった | bootstrap→org UUID→usage の2段階フェッチ |
-| BUG-09 | 週間使用量が常に0% | seven_dayのキー名・スケールの誤認識 | キー名修正 + 0〜1スケールの正規化 |
-| BUG-10 | stale表示が自動更新されない | updateStatusBarがデータ受信時のみ呼ばれていた | カウントダウンタイマー内でも呼ぶよう変更 |
+| #      | 症状                         | 原因                                                 | 解決                                      |
+| ------ | ---------------------------- | ---------------------------------------------------- | ----------------------------------------- |
+| BUG-03 | JSが発火しない               | WebViewがビュー階層に未所属                          | 画面外ウィンドウ（x:-2048）に載せる       |
+| BUG-05 | async JSの戻り値が取れない   | evaluateJavaScriptはPromise非対応                    | callAsyncJavaScriptに変更                 |
+| BUG-08 | データが全く取れない         | APIエンドポイントの特定ができていなかった            | bootstrap→org UUID→usage の2段階フェッチ  |
+| BUG-09 | 週間使用量が常に0%           | seven_dayのキー名・スケールの誤認識                  | キー名修正 + 0〜1スケールの正規化         |
+| BUG-10 | stale表示が自動更新されない  | updateStatusBarがデータ受信時のみ呼ばれていた        | カウントダウンタイマー内でも呼ぶよう変更  |
 | BUG-11 | Loading...のまま表示されない | /api/bootstrapのレスポンス構造変更でorg UUID取得不可 | GET /api/organizations 直接呼び出しに変更 |
-| BUG-12 | メモリ使用量が2.4GBを超える | WKWebViewがページを常駐保持 | JS完了後にブランクページへ遷移して解放 |
+| BUG-12 | メモリ使用量が2.4GBを超える  | WKWebViewがページを常駐保持                          | JS完了後にブランクページへ遷移して解放    |
+| BUG-14 | スリープ復帰時に~2.4GBへ膨張 | 取得のたびに claude.ai の React SPA を丸ごとロード   | `loadSimulatedRequest`で空HTMLを置き同オリジンfetch + sleep/wake処理 |
 
 ## ライセンス
 

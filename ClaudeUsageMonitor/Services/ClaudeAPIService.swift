@@ -85,8 +85,30 @@ class ClaudeAPIService: NSObject {
     }
 
     func fetchUsage() {
-        NSLog("[ClaudeMonitor] fetchUsage: loading %@", usageURL.absoluteString)
-        webView.load(URLRequest(url: usageURL))
+        NSLog("[ClaudeMonitor] fetchUsage: simulated load %@", usageURL.absoluteString)
+        // 進行中のロードがあれば中断（スリープ復帰時の二重ロード防止）
+        webView.stopLoading()
+
+        // claude.ai オリジン上に「空の最小ドキュメント」を置く。
+        // 重い React SPA をロードせずに済むため WebContent プロセスのメモリ膨張を防ぐ。
+        // ドキュメントのオリジンが claude.ai なので、保存済み Cookie を使った
+        // same-origin の fetch（fetchJS）はそのまま動作する。
+        let html = "<!DOCTYPE html><html><head></head><body></body></html>"
+        let request = URLRequest(url: usageURL)
+        let response = HTTPURLResponse(
+            url: usageURL,
+            statusCode: 200,
+            httpVersion: "HTTP/1.1",
+            headerFields: ["Content-Type": "text/html; charset=utf-8"]
+        )!
+        webView.loadSimulatedRequest(request, response: response, responseData: Data(html.utf8))
+    }
+
+    /// スリープ突入時: 進行中ロードを止め、空ページにしてメモリを解放する。
+    func prepareForSleep() {
+        NSLog("[ClaudeMonitor] prepareForSleep: releasing page")
+        webView.stopLoading()
+        webView.loadHTMLString("<html><body></body></html>", baseURL: nil)
     }
 
     // MARK: - JS evaluation after page load
@@ -124,6 +146,14 @@ class ClaudeAPIService: NSObject {
         }
 
         if let err = root["error"] as? String {
+            // 簡易ドキュメントではログインへ自動リダイレクトされないため、
+            // fetch の HTTP ステータスで未ログインを判定する。
+            let status = root["status"] as? Int ?? 0
+            if status == 401 || status == 403 {
+                NSLog("[ClaudeMonitor] needsLogin (status=%d)", status)
+                delegate?.needsLogin()
+                return
+            }
             NSLog("[ClaudeMonitor] ❌ %@ orgs=%@", err, String(describing: root["orgs"]))
             return
         }

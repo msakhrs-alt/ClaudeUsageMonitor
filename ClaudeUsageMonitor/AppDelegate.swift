@@ -21,11 +21,35 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         setupPopover()
         setupAPIService()
         startRefreshTimer()
+        registerSleepWakeObservers()
 
         Task {
             await UpdateService.shared.checkForUpdates()
             contentViewModel.updateAvailable = UpdateService.shared.latestVersion
         }
+    }
+
+    // MARK: - Sleep / Wake
+
+    /// スリープ復帰時に WebContent プロセスがメモリ膨張するのを防ぐため、
+    /// スリープ前にタイマーを止めてページを解放し、復帰後に再開・再取得する。
+    private func registerSleepWakeObservers() {
+        let nc = NSWorkspace.shared.notificationCenter
+        nc.addObserver(self, selector: #selector(systemWillSleep),
+                       name: NSWorkspace.willSleepNotification, object: nil)
+        nc.addObserver(self, selector: #selector(systemDidWake),
+                       name: NSWorkspace.didWakeNotification, object: nil)
+    }
+
+    @objc private func systemWillSleep() {
+        refreshTimer?.invalidate()
+        countdownTimer?.invalidate()
+        apiService.prepareForSleep()
+    }
+
+    @objc private func systemDidWake() {
+        startRefreshTimer()
+        fetchUsage()
     }
 
     // MARK: - Setup
